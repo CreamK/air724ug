@@ -358,43 +358,47 @@ class UploadIntegrationTests(unittest.TestCase):
             self.assertTrue(result[0][0])
         self.assertEqual(captured[0][2], self.wav)
 
+    def prepare_call_handler(self, h):
+        g = h.lua.globals()
+        g.test_record_path = str(self.path).encode()
+        h.lua.execute(b"""
+            require 'config'
+            callbacks, timers, notices = {}, {}, {}
+            sys.subscribe = function(event, fn) callbacks[event] = fn end
+            sys.timerStart = function(fn, delay, ...) table.insert(timers, {fn=fn, delay=delay, args={...}}) end
+            sys.timerStopAll = function() end
+            runTimer = function(delay)
+                for i, timer in ipairs(timers) do
+                    if timer.delay == delay then
+                        table.remove(timers, i)
+                        return timer.fn(unpack(timer.args))
+                    end
+                end
+                error('timer not found')
+            end
+            cc = {anyCallExist=function() return true end, accept=function() end, hangUp=function() end}
+            ril = {regUrc=function() end}
+            record = {getFilePath=function() return test_record_path end,
+                start=function(seconds, cb) record.seconds=seconds; record.complete=cb end}
+            audio = setmetatable({play=function(_, _, _, _, cb) cb(true) end},
+                {__index=function() return function() return 1 end end})
+            util_notify = {add=function(msg) table.insert(notices, msg) end}
+            sim = {getNumber=function() return '13800138000' end}
+            AUDIO_OUTPUT_CHANNEL_NORMAL, AUDIO_INPUT_CHANNEL_NORMAL = 2, 0
+            AUDIO_OUTPUT_CHANNEL_MUTE, AUDIO_INPUT_CHANNEL_MUTE = 0, 1
+            local taskInit = sys.taskInit
+            sys.taskInit = function() end -- don't run the modem LED loop
+            dofile(TEST_HANDLER_PATH)
+            sys.taskInit = taskInit
+        """.replace(b"TEST_HANDLER_PATH", json.dumps(str(ROOT / "script/handler/handler_call.lua")).encode()))
+        return g
+
     def test_call_recording_uses_config_loaded_after_handler_initialization(self):
         captured, routed = [], []
         with OneShotServer(self.make_target(captured, 201)) as target:
             with OneShotServer(self.make_proxy(routed, True)) as proxy:
                 h = Harness()
-                g = h.lua.globals()
-                g.test_record_path = str(self.path).encode()
-                h.lua.execute(b"""
-                    require 'config'
-                    callbacks, timers, notices = {}, {}, {}
-                    sys.subscribe = function(event, fn) callbacks[event] = fn end
-                    sys.timerStart = function(fn, delay, ...) table.insert(timers, {fn=fn, delay=delay, args={...}}) end
-                    sys.timerStopAll = function() end
-                    runTimer = function(delay)
-                        for i, timer in ipairs(timers) do
-                            if timer.delay == delay then
-                                table.remove(timers, i)
-                                return timer.fn(unpack(timer.args))
-                            end
-                        end
-                        error('timer not found')
-                    end
-                    cc = {anyCallExist=function() return true end, accept=function() end, hangUp=function() end}
-                    ril = {regUrc=function() end}
-                    record = {getFilePath=function() return test_record_path end,
-                        start=function(seconds, cb) record.seconds=seconds; record.complete=cb end}
-                    audio = setmetatable({play=function(_, _, _, _, cb) cb(true) end},
-                        {__index=function() return function() return 1 end end})
-                    util_notify = {add=function(msg) table.insert(notices, msg) end}
-                    sim = {getNumber=function() return '13800138000' end}
-                    AUDIO_OUTPUT_CHANNEL_NORMAL, AUDIO_INPUT_CHANNEL_NORMAL = 2, 0
-                    AUDIO_OUTPUT_CHANNEL_MUTE, AUDIO_INPUT_CHANNEL_MUTE = 0, 1
-                    local taskInit = sys.taskInit
-                    sys.taskInit = function() end -- don't run the modem LED loop
-                    dofile(TEST_HANDLER_PATH)
-                    sys.taskInit = taskInit
-                """.replace(b"TEST_HANDLER_PATH", json.dumps(str(ROOT / "script/handler/handler_call.lua")).encode()))
+                g = self.prepare_call_handler(h)
                 self.assertIsNone(g.config.UPLOAD_URL)
                 config = {
                     "UPLOAD_URL": f"http://uploads.invalid:{target.port}/base",
@@ -420,6 +424,55 @@ class UploadIntegrationTests(unittest.TestCase):
                 self.assertTrue(any(f"http://uploads.invalid:{target.port}/base/record/13800138000/" in line for line in notice))
         self.assertEqual(captured[0][2], self.wav)
         self.assertIn(b"/base/record/13800138000/", captured[0][0])
+
+    def test_recording_upload_rejects_console_and_storage_error_responses(self):
+        cases = [
+            # Actual failure mode: the Console serves its HTML app with HTTP 200.
+            (200, {"Server": "MinIO Console", "Content-Type": "text/html"},
+             b"<!doctype html><html><title>MinIO Console</title></html>", "MinIO 控制台"),
+            # A proxy can remove/change Server or the Content-Type header casing.
+            (200, {"content-type": "Text/HTML; charset=utf-8"}, b"Login page", "HTML 网页"),
+            (200, {}, b"\xef\xbb\xbf \n<!DOCTYPE html><html>Login</html>", "HTML 网页"),
+            (200, {"Content-Type": "application/xhtml+xml"}, b"<html/>", "HTML 网页"),
+            # Preserve the real S3 error instead of reporting HTTP 200 as success.
+            (200, {"Content-Type": "application/xml"},
+             b'<?xml version="1.0"?><Error><Code>AccessDenied</Code></Error>', "AccessDenied"),
+            (403, {"x-minio-error-code": "AccessDenied"}, b"", "AccessDenied"),
+            (403, {"Content-Type": "application/xml"},
+             b"<Error><Code>NoSuchBucket</Code></Error>", "NoSuchBucket"),
+            (500, {}, b"", "500"),
+            # Retain normal S3 and generic HTTP upload success behavior.
+            (200, {"Server": "MinIO", "ETag": '"test-object-etag"'}, b"", None),
+            (201, {"Content-Type": "application/json"}, b'{"created":true}', None),
+            (204, {}, b"", None),
+        ]
+        for status, headers, body, error in cases:
+            with self.subTest(status=status, headers=headers, error=error):
+                response = f"HTTP/1.1 {status} Response\r\nContent-Length: {len(body)}\r\n".encode()
+                response += b"".join(f"{key}: {value}\r\n".encode() for key, value in headers.items())
+                response += b"\r\n" + body
+                client = FakeSocket([b"\x05\x00", b"\x05\x00\x00\x01" + b"\x00" * 6, response])
+                h = Harness(lambda: client)
+                g = self.prepare_call_handler(h)
+                g.config.UPLOAD_URL = b"http://uploads.invalid:9001/voice"
+                g.config.UPLOAD_SOCKS5_ENABLE = True
+                g.config.UPLOAD_SOCKS5_HOST = b"proxy.invalid"
+                g.config.CALL_IN_ACTION = 1
+                g.config.TTS_TEXT = b"Please leave a message"
+                g.callbacks[b"CALL_INCOMING"](b"10086")
+                g.callbacks[b"CALL_CONNECTED"](b"10086")
+                g.runTimer(1000)
+                g.runTimer(300)
+                g.record.complete(True, len(self.wav))
+                notice = "\n".join(value.decode() for _, value in g.notices[len(g.notices)].items())
+                if error:
+                    self.assertIn("录音结果: 失败", notice)
+                    self.assertIn(error, notice)
+                    self.assertNotIn("录音文件:", notice)
+                else:
+                    self.assertIn("录音结果: 成功", notice)
+                    self.assertIn("录音文件:", notice)
+                self.assertTrue(client.closed)
 
 
 if __name__ == "__main__":

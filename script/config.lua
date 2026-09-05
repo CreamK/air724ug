@@ -120,6 +120,9 @@ NOTIFY_RETRY_MAX = 10
 -- 提示: 本项目未使用签名认证上传, 请勿泄露自己的地址及目录名
 -- 当注释掉或者为空则不启用上传, 并且会将来电动作配置项覆盖为: 接听 -> 接听后挂断
 -- UPLOAD_URL = "http://xxx-123456.cos.ap-nanjing.myqcloud.com/{录音文件目录}"
+-- MinIO 示例: http://minio.example.com:9000/voice（voice 为已有桶名）
+-- 使用 S3 API 端口；9001 常用于控制台，返回网页不代表上传成功。
+-- 当前为无签名 PUT；MinIO 目标对象路径需允许匿名 PutObject，私有桶密钥鉴权尚未实现。
 
 -- 仅录音上传使用 SOCKS5；UPLOAD_URL 仍填写真实目标地址，且必须为 http://。
 -- 代理失败不回退直连；SOCKS5 不加密 HTTP 录音数据。

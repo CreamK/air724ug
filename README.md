@@ -79,10 +79,18 @@ UPLOAD_SOCKS5_TIMEOUT = 15000 -- 连接代理和协议握手的总超时，毫�
 - 仅支持 `http://` 上传；启用代理时遇到 HTTPS 或代理失败会报告上传失败，不会回退直连。
 - SOCKS5 不加密 HTTP 文件数据，用户名/密码认证本身也不提供加密。
 - 代理连接和握手超时允许设置 1-300000 毫秒；上传阶段沿用原 HTTP 超时配置。
-- 上传成功接受 HTTP 2xx 状态，包括 200、201、204。
+- 上传成功接受 HTTP 2xx 状态，包括 200、201、204，但会将 MinIO 控制台、HTML 网页和 S3 错误响应判为失败。日志会输出 HTTP 状态、Content-Type、Server 和 ETag，失败通知包含原因。
 - 上传开关、目标地址和代理配置在使用时读取，因此开机从 `config.bin` 加载的配置能生效。
 
 升级时需一起烧录本次更新的 `script/` 脚本，包含新增的 `lib/socks5.lua`。只替换 `config.bin` 不会给旧版脚本增加代理能力。
+
+#### MinIO 地址与上传结果排查
+
+`UPLOAD_URL` 应填写 S3 API 地址和已有桶名，例如 `http://minio.example.com:9000/voice`。MinIO 的 API 默认端口为 9000；9001 常用于控制台，具体以部署的端口映射为准。控制台可能对文件路径返回 `200 OK` 和 HTML 页面，这不表示对象已保存。[MinIO HTTP 接口说明](https://docs.min.io/aistor/reference/aistor-server/http-endpoints/)
+
+当前上传是无签名 PUT，目标 `record/` 路径需要允许匿名 `PutObject`；私有桶的 AccessKey / SecretKey 签名尚未实现。上传权限与读取、列举权限相互独立，`HEAD` 或列举桶返回 403 不能直接证明 PUT 无权限。若实际 PUT 返回 `AccessDenied`，需检查目标路径的上传策略或使用带签名的上传实现。
+
+修改生成器中的上传 URL 后，重新导出 `config.bin`，覆盖设备虚拟 U 盘根目录中的同名文件并重启。响应检查的代码修复需同时更新设备脚本；仅改配置不能改变旧版脚本的成功判断。
 
 ### 配置生成器
 

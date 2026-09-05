@@ -137,15 +137,55 @@ local function recordUploadResultNotify(result, url, msg)
     util_notify.add(lines)
 end
 
--- 录音上传结果回调
-local function customHttpCallback(url, result, prompt, head, body)
+local function responseHeader(head, name)
+    for key, value in pairs(type(head) == "table" and head or {}) do
+        if type(key) == "string" and key:lower() == name then
+            return tostring(value)
+        end
+    end
+    return ""
+end
+
+local function uploadResponseError(result, prompt, head, body)
+    local contentType = responseHeader(head, "content-type"):lower()
+    local server = responseHeader(head, "server"):lower()
+    -- 只检查有限长度的响应前缀，避免将整个控制台页面写入设备日志。
+    local prefix = type(body) == "string" and body:sub(1, 1024) or ""
+    prefix = prefix:gsub("^\239\187\191", "")
+    local lowerPrefix = prefix:lower()
+    if server:find("minio console", 1, true) then
+        return "上传地址指向 MinIO 控制台，请使用 S3 API 地址（通常为 9000 端口）"
+    end
+    if contentType:find("text/html", 1, true) or contentType:find("application/xhtml+xml", 1, true)
+        or lowerPrefix:find("^%s*<!doctype%s+html") or lowerPrefix:find("^%s*<html[%s>]") then
+        return "上传接口返回 HTML 网页，请检查上传地址、端口或反向代理"
+    end
+    local errorCode = responseHeader(head, "x-minio-error-code")
+    local xml = prefix:gsub("^%s*<%?xml.-%?>", "")
+    if xml:find("^%s*<Error[%s>]") then
+        errorCode = xml:match("<Code>%s*([%w_.%-]+)%s*</Code>") or "S3Error"
+    end
+    if errorCode ~= "" then
+        return "存储服务拒绝上传: " .. errorCode:sub(1, 100)
+    end
     local status = tonumber(prompt)
-    if result and status and status >= 200 and status < 300 then
+    if not result or not status or status < 200 or status >= 300 then
+        return "录音上传失败: " .. tostring(prompt or "无 HTTP 响应")
+    end
+end
+
+-- 录音上传结果回调：HTTP 2xx 之外，还需排除控制台页面和存储错误响应。
+local function customHttpCallback(url, result, prompt, head, body)
+    local err = uploadResponseError(result, prompt, head, body)
+    log.info("handler_call.uploadResponse", "HTTP:", prompt,
+        "Content-Type:", responseHeader(head, "content-type"),
+        "Server:", responseHeader(head, "server"), "ETag:", responseHeader(head, "etag"))
+    if not err then
         log.info("handler_call.customHttpCallback", "录音上传成功", url, result, prompt)
         recordUploadResultNotify(true, url)
     else
-        log.error("handler_call.customHttpCallback", "录音上传失败", url, result, prompt, head, body)
-        recordUploadResultNotify(false, nil, "录音上传失败")
+        log.error("handler_call.customHttpCallback", "录音上传失败", url, result, prompt, err)
+        recordUploadResultNotify(false, nil, err)
     end
 end
 
