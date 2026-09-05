@@ -9,3 +9,6 @@
 !driver/**
 !cloudflare-config-generator/
 !cloudflare-config-generator/**
+!tests/
+!tests/*.py
+!tests/requirements.txt

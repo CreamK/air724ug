@@ -307,18 +307,19 @@ end
 --              虽然说此处的数据长度没有特别限制，但是调用core中的socket发送接口时，每次最多发送11200字节的数据
 --              例如此处传入的data长度是112000字节，则在这个send接口中，会循环10次，每次发送11200字节的数据
 -- @number[opt=120] timeout 可选参数，发送超时时间，单位秒
+-- @bool[opt=false] sensitive，true时不在调试日志中打印发送数据
 -- @return result true - 成功，false - 失败
 -- @usage
 -- socketClient = socket.tcp()
 -- socketClient:connect("www.baidu.com","80")
 -- socketClient:send("12345678")
-function mt:send(data, timeout)
+function mt:send(data, timeout, sensitive)
     assert(self.co == coroutine.running(), "socket:send: coroutine mismatch")
     if self.error then
         log.warn('socket.client:send', 'error', self.error)
         return false
     end
-    log.debug("socket.send", "total " .. string.len(data or "") .. " bytes", "first 30 bytes", (data or ""):sub(1, 30))
+    log.debug("socket.send", "total " .. string.len(data or "") .. " bytes", "first 30 bytes", sensitive and "[redacted]" or (data or ""):sub(1, 30))
     local sendSize = self.protocol == "UDP" and 1472 or SENDSIZE
     for i = 1, string.len(data or ""), sendSize do
         -- 按最大MTU单元对data分包

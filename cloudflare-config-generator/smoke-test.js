@@ -62,6 +62,12 @@ const FORM_IDS = [
   "serverchanTitle",
   "smsWhitelist",
   "uploadUrl",
+  "uploadSocks5Enable",
+  "uploadSocks5Host",
+  "uploadSocks5Port",
+  "uploadSocks5Username",
+  "uploadSocks5Password",
+  "uploadSocks5Timeout",
   "extraLua",
 ];
 
@@ -111,6 +117,7 @@ function makeElement(id) {
   ]);
   const checkboxIds = new Set([
     "allowLegacyLua",
+    "uploadSocks5Enable",
     "rndisEnable",
     "ledEnable",
     "notifyAppendMoreInfo",
@@ -343,12 +350,62 @@ function runLegacyModeTest() {
 const jsonResult = runJsonModeTest();
 const legacyResult = runLegacyModeTest();
 
+function runSocks5Test() {
+  const { api, elements } = createHarness();
+  let preview = api.renderPreview();
+  assert.equal(JSON.parse(preview.payloadText).config.UPLOAD_SOCKS5_ENABLE, false);
+  elements.uploadSocks5Enable.checked = true;
+  elements.uploadUrl.value = "http://upload.example.com/base";
+  elements.uploadSocks5Host.value = "proxy.example.com";
+  elements.uploadSocks5Port.value = "1081";
+  elements.uploadSocks5Timeout.value = "12000";
+  elements.uploadSocks5Username.value = " test-user ";
+  elements.uploadSocks5Password.value = 'test-pass\\"密';
+  preview = api.renderPreview();
+  const encrypted = api.createConfigBin(preview.payloadText, preview.state.configKey);
+  const payload = JSON.parse(decryptConfigBin(encrypted.base64, encrypted.compatKey));
+  assert.equal(payload.config.UPLOAD_SOCKS5_ENABLE, true);
+  assert.equal(payload.config.UPLOAD_SOCKS5_HOST, "proxy.example.com");
+  assert.equal(payload.config.UPLOAD_SOCKS5_PORT, 1081);
+  assert.equal(payload.config.UPLOAD_SOCKS5_TIMEOUT, 12000);
+  assert.equal(payload.config.UPLOAD_SOCKS5_USERNAME, " test-user ");
+  assert.equal(payload.config.UPLOAD_SOCKS5_PASSWORD, 'test-pass\\"密');
+  elements.exportFormat.value = "legacy-lua";
+  preview = api.renderPreview();
+  const legacy = api.createConfigBin(preview.payloadText, preview.state.configKey);
+  const lua = decryptConfigBin(legacy.base64, legacy.compatKey);
+  assert.ok(lua.includes("UPLOAD_SOCKS5_ENABLE = true"));
+  assert.ok(lua.includes('UPLOAD_SOCKS5_USERNAME = " test-user "'));
+  assert.ok(lua.includes('UPLOAD_SOCKS5_PASSWORD = "test-pass\\\\\\"密"'));
+  for (const [id, value] of [
+    ["uploadUrl", "https://upload.example.com"],
+    ["uploadSocks5Host", "socks5://proxy.example.com"],
+    ["uploadSocks5Port", "0"],
+    ["uploadSocks5Port", "65536"],
+    ["uploadSocks5Timeout", "0"],
+    ["uploadSocks5Password", ""],
+    ["uploadSocks5Password", "密".repeat(86)],
+  ]) {
+    const old = elements[id].value;
+    elements[id].value = value;
+    assert.throws(() => api.renderPreview(), /SOCKS5/);
+    elements[id].value = old;
+  }
+  elements.uploadSocks5Username.value = "";
+  elements.uploadSocks5Password.value = "";
+  assert.doesNotThrow(() => api.renderPreview());
+  return { ok: true, modes: ["json", "legacy-lua"], validation: true };
+}
+
+const socks5Result = runSocks5Test();
+
 console.log(
   JSON.stringify(
     {
       ok: true,
       json: jsonResult,
       legacy: legacyResult,
+      socks5: socks5Result,
     },
     null,
     2

@@ -6,6 +6,7 @@
 -- @release 2017.10.23
 require"socket"
 require"utils"
+require"socks5"
 module(..., package.seeall)
 
 local function response(client,cbFnc,result,prompt,head,body)
@@ -26,8 +27,11 @@ local function getFileBase64Len(s)
     if s then return (io.fileSize(s)+2)/3*4 end
 end
 
-local function taskClient(method,protocal,auth,host,port,path,cert,head,body,timeout,cbFnc,rcvFilePath,tCoreExtPara)
+local function taskClient(method,protocal,auth,host,port,path,cert,head,body,timeout,cbFnc,rcvFilePath,tCoreExtPara,proxy)
     log.info("http path",path)
+    if proxy ~= nil and protocal ~= "http" then
+        return response(nil,cbFnc,false,"SOCKS5 upload supports HTTP only")
+    end
     while not socket.isReady() do
         if not sys.waitUntil("IP_READY_IND",timeout) then return response(nil,cbFnc,false,"network not ready") end
     end
@@ -46,7 +50,10 @@ local function taskClient(method,protocal,auth,host,port,path,cert,head,body,tim
 
     --重构head
     local heads = head or {}
-    if not heads.Host then heads["Host"] = host end
+    if not heads.Host then
+        local defaultPort = protocal == "https" and 443 or 80
+        heads["Host"] = host .. (tonumber(port) == defaultPort and "" or ":" .. port)
+    end
     if not heads.Connection then heads["Connection"] = "short" end
     if bodyLen>0 and bodyLen~=tonumber(heads["Content-Length"] or "0") then heads["Content-Length"] = bodyLen end
     if auth~="" and not heads.Authorization then heads["Authorization"] = ("Basic "..crypto.base64_encode(auth,#auth)) end
@@ -56,10 +63,17 @@ local function taskClient(method,protocal,auth,host,port,path,cert,head,body,tim
     end
     headStr = headStr.."\r\n"
 
-    local client = socket.tcp(protocal=="https",cert,tCoreExtPara)
-    if not client then return response(nil,cbFnc,false,"create socket error") end
-    if not client:connect(host,port,timeout/1000) then
-        return response(client,cbFnc,false,"connect fail")
+    local client
+    if proxy ~= nil then
+        local err
+        client, err = socks5.connect(proxy,host,port,timeout,tCoreExtPara)
+        if not client then return response(nil,cbFnc,false,err) end
+    else
+        client = socket.tcp(protocal=="https",cert,tCoreExtPara)
+        if not client then return response(nil,cbFnc,false,"create socket error") end
+        if not client:connect(host,port,timeout/1000) then
+            return response(client,cbFnc,false,"connect fail")
+        end
     end
 
     --发送请求行+请求头+string类型的body
@@ -117,9 +131,9 @@ local function taskClient(method,protocal,auth,host,port,path,cert,head,body,tim
             if not rcvChunked then
                 contentLen = tonumber(rspHead["Content-Length"] or "2147483647")
             end
-			if method == "HEAD" then 
-				contentLen = 0
-			end
+            if method == "HEAD" or statusCode == "204" or statusCode == "304" then
+                contentLen = 0
+            end
             --未处理的body数据
             rcvCache = rcvCache:sub(d2+1,-1)
             break
@@ -263,6 +277,7 @@ end
 --                               totalLen: 实体数据的总长度
 --                               statusCode：服务器的应答码   
 -- @table[opt=nil] tCoreExtPara,table类型{rcvBufferSize=0}修改缓冲空间大小，解决窗口满连接超时问题，单位:字节
+-- @table[opt=nil] proxy, SOCKS5配置{host,port,username,password,timeout}，仅支持http；失败不直连
 -- @return string rcvFilePath，如果传入了rcvFileName，则返回对应的完整路径；其余情况都返回nil
 -- @usage
 -- http.request("GET","www.lua.org",nil,nil,nil,30000,cbFnc)
@@ -276,7 +291,7 @@ end
 -- http.request("GET","https://www.baidu.com",{caCert="ca.crt"})
 -- http.request("GET","https://www.baidu.com",{caCert="ca.crt",clientCert = "client.crt",clientKey = "client.key"})
 -- http.request("GET","https://www.baidu.com",{caCert="ca.crt",clientCert = "client.crt",clientKey = "client.key",clientPassword = "123456"})
-function request(method,url,cert,head,body,timeout,cbFnc,rcvFileName,tCoreExtPara)
+function request(method,url,cert,head,body,timeout,cbFnc,rcvFileName,tCoreExtPara,proxy)
     local protocal,auth,hostName,port,path,d1,d2,offset,rcvFilePath
     d1,d2,protocal = url:find("^(%a+)://")
     if not protocal then protocal = "http" end
@@ -303,9 +318,8 @@ function request(method,url,cert,head,body,timeout,cbFnc,rcvFileName,tCoreExtPar
 
     path = url:sub(offset+1,-1)
 
-    sys.taskInit(taskClient,method,protocal,auth or "",hostName,port,path=="" and "/" or path,cert,head,body or "",timeout or 30000,cbFnc,rcvFileName,tCoreExtPara)
+    sys.taskInit(taskClient,method,protocal,auth or "",hostName,port,path=="" and "/" or path,cert,head,body or "",timeout or 30000,cbFnc,rcvFileName,tCoreExtPara,proxy)
     if type(rcvFileName) == "string" then
         return rcvFileName
     end
 end
-

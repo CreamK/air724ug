@@ -72,6 +72,12 @@ const formIds = [
   "serverchanTitle",
   "smsWhitelist",
   "uploadUrl",
+  "uploadSocks5Enable",
+  "uploadSocks5Host",
+  "uploadSocks5Port",
+  "uploadSocks5Username",
+  "uploadSocks5Password",
+  "uploadSocks5Timeout",
   "extraLua",
 ];
 
@@ -156,6 +162,12 @@ const defaultState = {
   serverchanTitle: "来自 Air724UG 的通知",
   smsWhitelist: [],
   uploadUrl: "",
+  uploadSocks5Enable: false,
+  uploadSocks5Host: "",
+  uploadSocks5Port: 1080,
+  uploadSocks5Username: "",
+  uploadSocks5Password: "",
+  uploadSocks5Timeout: 15000,
   extraLua: "",
 };
 
@@ -261,6 +273,12 @@ const configKeyOrder = [
   "SERVERCHAN_TITLE",
   "SERVERCHAN_API",
   "UPLOAD_URL",
+  "UPLOAD_SOCKS5_ENABLE",
+  "UPLOAD_SOCKS5_HOST",
+  "UPLOAD_SOCKS5_PORT",
+  "UPLOAD_SOCKS5_USERNAME",
+  "UPLOAD_SOCKS5_PASSWORD",
+  "UPLOAD_SOCKS5_TIMEOUT",
   "SMS_CONTROL_WHITELIST_NUMBERS",
   "SMS_TTS",
   "TTS_TEXT",
@@ -375,6 +393,12 @@ function readFormState() {
     serverchanTitle: el.serverchanTitle.value.trim(),
     smsWhitelist: splitList(el.smsWhitelist.value),
     uploadUrl: el.uploadUrl.value.trim(),
+    uploadSocks5Enable: el.uploadSocks5Enable.checked,
+    uploadSocks5Host: el.uploadSocks5Host.value.trim(),
+    uploadSocks5Port: Number(el.uploadSocks5Port.value),
+    uploadSocks5Username: el.uploadSocks5Username.value,
+    uploadSocks5Password: el.uploadSocks5Password.value,
+    uploadSocks5Timeout: Number(el.uploadSocks5Timeout.value),
     extraLua: el.extraLua.value.trim(),
   };
 }
@@ -468,6 +492,28 @@ function maybeSet(configObject, key, value) {
 }
 
 function buildConfigObject(state) {
+  if (state.uploadSocks5Enable) {
+    if (!/^http:\/\/[^/?#\s]+(?:[/?#]|$)/.test(state.uploadUrl)) {
+      throw new Error("启用 SOCKS5 时，录音上传 URL 必须填写 http:// 地址");
+    }
+    const hostBytes = CryptoJS.enc.Utf8.parse(state.uploadSocks5Host).sigBytes;
+    if (!hostBytes || hostBytes > 255 || /[\s\x00/:@]/.test(state.uploadSocks5Host)) {
+      throw new Error("SOCKS5 地址请填写域名或 IPv4，不含协议、端口和路径");
+    }
+    if (!Number.isInteger(state.uploadSocks5Port) || state.uploadSocks5Port < 1 || state.uploadSocks5Port > 65535) {
+      throw new Error("SOCKS5 端口必须是 1-65535 的整数");
+    }
+    if (!Number.isInteger(state.uploadSocks5Timeout) || state.uploadSocks5Timeout < 1 || state.uploadSocks5Timeout > 300000) {
+      throw new Error("SOCKS5 握手超时必须是 1-300000 毫秒的整数");
+    }
+    if (state.uploadSocks5Username || state.uploadSocks5Password) {
+      const usernameBytes = CryptoJS.enc.Utf8.parse(state.uploadSocks5Username).sigBytes;
+      const passwordBytes = CryptoJS.enc.Utf8.parse(state.uploadSocks5Password).sigBytes;
+      if (usernameBytes < 1 || usernameBytes > 255 || passwordBytes < 1 || passwordBytes > 255) {
+        throw new Error("SOCKS5 用户名和密码必须同时填写，各为 1-255 字节；无认证时均留空");
+      }
+    }
+  }
   const configObject = {
     CONFIG_BIN_KEY: state.configKey,
     CONFIG_BIN_ALLOW_LEGACY_LUA: Boolean(state.allowLegacyLua),
@@ -490,6 +536,12 @@ function buildConfigObject(state) {
     LED_ENABLE: state.ledEnable,
     PIN_CODE: state.pinCode,
     NUMBER: state.number,
+    UPLOAD_SOCKS5_ENABLE: state.uploadSocks5Enable,
+    UPLOAD_SOCKS5_HOST: state.uploadSocks5Host,
+    UPLOAD_SOCKS5_PORT: state.uploadSocks5Port,
+    UPLOAD_SOCKS5_USERNAME: state.uploadSocks5Username,
+    UPLOAD_SOCKS5_PASSWORD: state.uploadSocks5Password,
+    UPLOAD_SOCKS5_TIMEOUT: state.uploadSocks5Timeout,
   };
 
   maybeSet(configObject, "TTS_TEXT", state.ttsText.trim());

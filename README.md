@@ -58,6 +58,32 @@ driver/
 
 如果电脑首次连接 Air724UG 设备没有正确识别串口，可以先安装 `driver/` 目录中的驱动。
 
+### SOCKS5 + HTTP 录音上传
+
+支持通过 SOCKS5 代理上传录音，包括无认证和用户名/密码认证。代理只用于录音上传，通知等其他请求仍使用原来的连接方式。默认关闭代理。
+
+在 `script/config.lua` 中填写，或在配置生成器的“短信控制与录音 → 录音上传 SOCKS5 代理”中配置后导出 `config.bin`：
+
+```lua
+UPLOAD_URL = "http://storage.example.com/voice" -- 实际上传目标，保留原来的存储目录
+UPLOAD_SOCKS5_ENABLE = true
+UPLOAD_SOCKS5_HOST = "proxy.example.com"        -- 域名或 IPv4，不含协议、端口和路径
+UPLOAD_SOCKS5_PORT = 1080
+UPLOAD_SOCKS5_USERNAME = "" -- 无认证时用户名和密码都留空
+UPLOAD_SOCKS5_PASSWORD = "" -- 有认证时两项均填写，各为 1-255 字节
+UPLOAD_SOCKS5_TIMEOUT = 15000 -- 连接代理和协议握手的总超时，毫秒
+```
+
+设备先连接代理，再请求代理连接实际上传目标；目标域名由代理解析。文件仍通过 `PUT` 上传到 `{UPLOAD_URL}/record/{本机号码}/{日期}/{来电号码}_{时间戳}.wav`，通知中的录音链接也是这个目标地址。存储服务的上传权限和下载权限仍需配置，SOCKS5 不替代存储鉴权。
+
+- 仅支持 `http://` 上传；启用代理时遇到 HTTPS 或代理失败会报告上传失败，不会回退直连。
+- SOCKS5 不加密 HTTP 文件数据，用户名/密码认证本身也不提供加密。
+- 代理连接和握手超时允许设置 1-300000 毫秒；上传阶段沿用原 HTTP 超时配置。
+- 上传成功接受 HTTP 2xx 状态，包括 200、201、204。
+- 上传开关、目标地址和代理配置在使用时读取，因此开机从 `config.bin` 加载的配置能生效。
+
+升级时需一起烧录本次更新的 `script/` 脚本，包含新增的 `lib/socks5.lua`。只替换 `config.bin` 不会给旧版脚本增加代理能力。
+
 ### 配置生成器
 
 本地直接打开：
@@ -114,6 +140,17 @@ node cloudflare-config-generator/smoke-test.js
 - JSON 模式 `config.bin` 生成与回读
 - Legacy Lua 模式兼容性
 - 关键字段是否正确进入导出载荷
+- SOCKS5 配置在 JSON / Legacy Lua 模式下的导出和输入校验
+
+设备端 SOCKS5 和 HTTP 上传回归测试：
+
+```bash
+python3 -m venv /tmp/air724ug-tests
+/tmp/air724ug-tests/bin/pip install -r tests/requirements.txt
+/tmp/air724ug-tests/bin/python -m unittest discover -s tests -v
+```
+
+测试通过 Lupa 的 Lua 5.1 运行设备代码，使用本机 TCP SOCKS5 服务和 HTTP 接收服务验证认证、代理端域名解析、响应分片、拒绝及超时处理、文件内容一致性、直连兼容性，以及配置后加载时的完整来电录音上传流程。硬件音频和蜂窝网络仍需实机验证。
 
 ## 鸣谢
 

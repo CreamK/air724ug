@@ -424,6 +424,37 @@
             </label>
           </div>
 
+          <details>
+            <summary>录音上传 SOCKS5 代理</summary>
+            <label class="field checkbox-field">
+              <input id="uploadSocks5Enable" type="checkbox">
+              <span>启用录音上传代理</span>
+            </label>
+            <p>仅用于录音上传，上传 URL 需为 http:// 地址。代理失败时不直连。SOCKS5 不加密 HTTP 数据。</p>
+            <div class="grid two-col">
+              <label class="field">
+                <span>代理地址</span>
+                <input id="uploadSocks5Host" type="text" placeholder="proxy.example.com，不含协议和端口">
+              </label>
+              <label class="field">
+                <span>代理端口</span>
+                <input id="uploadSocks5Port" type="number" min="1" max="65535" step="1" value="1080">
+              </label>
+              <label class="field">
+                <span>用户名（无认证时留空）</span>
+                <input id="uploadSocks5Username" type="text" autocomplete="off">
+              </label>
+              <label class="field">
+                <span>密码（无认证时留空）</span>
+                <input id="uploadSocks5Password" type="password" autocomplete="new-password">
+              </label>
+              <label class="field">
+                <span>连接及握手超时（毫秒）</span>
+                <input id="uploadSocks5Timeout" type="number" min="1" max="300000" step="1" value="15000">
+              </label>
+            </div>
+          </details>
+
           <label class="field">
             <span>Legacy 追加 Lua（仅旧版 Lua 导出模式生效）</span>
             <textarea id="extraLua" rows="5" placeholder='例如：NUMBER = "13800138000"'></textarea>

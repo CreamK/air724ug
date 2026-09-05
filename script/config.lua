@@ -121,6 +121,16 @@ NOTIFY_RETRY_MAX = 10
 -- 当注释掉或者为空则不启用上传, 并且会将来电动作配置项覆盖为: 接听 -> 接听后挂断
 -- UPLOAD_URL = "http://xxx-123456.cos.ap-nanjing.myqcloud.com/{录音文件目录}"
 
+-- 仅录音上传使用 SOCKS5；UPLOAD_URL 仍填写真实目标地址，且必须为 http://。
+-- 代理失败不回退直连；SOCKS5 不加密 HTTP 录音数据。
+UPLOAD_SOCKS5_ENABLE = false
+UPLOAD_SOCKS5_HOST = "" -- 代理服务器域名或 IPv4，不含协议、端口和路径
+UPLOAD_SOCKS5_PORT = 1080
+-- 无认证时两项均留空；有认证时两项均填写，长度各为 1-255 字节。
+UPLOAD_SOCKS5_USERNAME = ""
+UPLOAD_SOCKS5_PASSWORD = ""
+UPLOAD_SOCKS5_TIMEOUT = 15000 -- TCP连接和SOCKS5握手共用的超时，毫秒，1-300000
+
 -------------------------------------------------- 短信来电配置 --------------------------------------------------
 
 -- 允许发短信控制设备的号码, 如果注释掉或者为空, 则禁止所有号码, 短信格式示例:

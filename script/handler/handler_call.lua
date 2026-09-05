@@ -1,14 +1,14 @@
 ------------------------------------------------- Config --------------------------------------------------
 -- 是否开启录音上传
-local record_enable = config.UPLOAD_URL and config.UPLOAD_URL ~= ""
+local function recordEnabled()
+    -- config.bin 在本模块加载后才读取，必须在使用时读取配置。
+    return type(config.UPLOAD_URL) == "string" and config.UPLOAD_URL ~= ""
+end
 
 -- 去除链接最后的斜杠
 local function trimSlash(url)
     return string.gsub(url, "/$", "")
 end
-
--- 录音上传接口
-local record_upload_url = trimSlash(config.UPLOAD_URL or "") .. "/record"
 
 -- 录音格式, 1:pcm 2:wav 3:amrnb 4:speex
 local record_format = 2
@@ -41,7 +41,7 @@ local CALL_RECORD_START_TIME = 0
 
 local function getCallInAction()
     -- 动作为接听, 但录音上传未开启
-    if config.CALL_IN_ACTION == 1 and not record_enable then
+    if config.CALL_IN_ACTION == 1 and not recordEnabled() then
         return 3
     end
     return config.CALL_IN_ACTION
@@ -139,7 +139,8 @@ end
 
 -- 录音上传结果回调
 local function customHttpCallback(url, result, prompt, head, body)
-    if result and prompt == "200" then
+    local status = tonumber(prompt)
+    if result and status and status >= 200 and status < 300 then
         log.info("handler_call.customHttpCallback", "录音上传成功", url, result, prompt)
         recordUploadResultNotify(true, url)
     else
@@ -150,7 +151,21 @@ end
 
 -- 录音上传
 local function upload()
-    local local_file = record.getFilePath()
+    if not recordEnabled() then
+        recordUploadResultNotify(false, nil, "录音上传地址未配置")
+        return
+    end
+    local record_upload_url = trimSlash(config.UPLOAD_URL) .. "/record"
+    local proxy
+    if config.UPLOAD_SOCKS5_ENABLE then
+        proxy = {
+            host = config.UPLOAD_SOCKS5_HOST,
+            port = config.UPLOAD_SOCKS5_PORT,
+            username = config.UPLOAD_SOCKS5_USERNAME,
+            password = config.UPLOAD_SOCKS5_PASSWORD,
+            timeout = config.UPLOAD_SOCKS5_TIMEOUT,
+        }
+    end
     local time = os.time()
     local date = os.date("*t", time)
     local date_str = string.format("%04d/%02d/%02d/%02d-%02d-%02d", date.year, date.month, date.day, date.hour, date.min, date.sec)
@@ -164,7 +179,7 @@ local function upload()
         customHttpCallback(url, ...)
     end
 
-    sys.taskInit(http.request, "PUT", url, nil, record_upload_header, record_upload_body, 50000, httpCallback)
+    sys.taskInit(http.request, "PUT", url, nil, record_upload_header, record_upload_body, 50000, httpCallback, nil, nil, proxy)
 end
 
 ------------------------------------------------- 录音相关 --------------------------------------------------
@@ -187,7 +202,7 @@ end
 
 -- 开始录音
 local function recordStart()
-    if not record_enable then
+    if not recordEnabled() then
         log.info("handler_call.recordStart", "未开启录音")
         return
     end

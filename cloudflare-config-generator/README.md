@@ -50,6 +50,14 @@
 
 ## 设备端配套改动
 
+### 录音上传 SOCKS5 配置
+
+在“短信控制与录音”中展开“录音上传 SOCKS5 代理”，填写代理地址、端口及可选用户名/密码。上传 URL 仍填写实际存储地址，启用代理时必须为 `http://`。无认证时用户名和密码均留空。JSON 和 Legacy Lua 两种导出模式均支持这些字段；已有浏览器预设未包含代理配置时默认关闭代理。
+
+设备需要同时升级 `script/lib/socks5.lua`、`script/lib/http.lua`、`script/lib/socket4G.lua`、`script/handler/handler_call.lua`、`script/config.lua` 和 `script/utils/util_config_loader.lua`。代理只用于录音上传，连接失败不会改为直连。SOCKS5 不加密 HTTP 数据。
+
+### 基础配置加载
+
 你需要把以下脚本一起烧录到设备：
 
 - [script/config.lua](../script/config.lua)
